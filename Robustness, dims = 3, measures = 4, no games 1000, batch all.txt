@@ -1,0 +1,21 @@
+Number of dimensions = 3, number of measurements per party = 4
+Number of games = 1000
+
+Max entangled state:
+
+Volume of nonlocality = 0.9619619619619619
+
+Total dataset:
+Lowest score = 1.2261405925992958e-14
+Highest score = 0.1272441908168097
+Mean score = 0.05529178123741053 ± 0.005250692258172348
+Median score = 0.057069133997271836
+STD of scores = 0.026387971026470478
+Conditional dataset (remove zero r (epsilons)):
+Lowest score = 0.0002085327969742272
+Mean score = 0.05747813679081154 ± 0.005565296664046123
+Median score = 0.058164699355706576
+STD of scores = 0.02445795484224507
+
+
+file created at 2022-07-27 09:31:50.912827Showing three standard deviations for the uncertainty

@@ -1,10 +1,5 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Created on Tue Feb 22 11:59:23 2022
-
-@author: oliverpage
-"""
+#%% Code block 2
+# Imports and required parameters
 
 import numpy as np
 import cvxpy as cp
@@ -15,6 +10,7 @@ import seaborn as sns
 from tqdm import tqdm
 import multiprocessing as mp
 import datetime
+import itertools
 
 # Parameters
 no_dimensions = 4
@@ -26,6 +22,10 @@ no_batches = 1
 # Conversions
 d2 = no_dimensions**2
 n2 = no_measurements**2
+
+#%% Code block 3
+
+# Defining functions
 
 def get_random_measurements():
     """
@@ -149,98 +149,99 @@ def probability(state, Alice_measurement, Bob_proj):
     return np.real(np.trace(sigma_times_M))
 
 
-def matrix_of_det_strats(): # to do
+def get_all_diag_values():
     """
-    Generate a 36x81 matrix with 0's and 1's where each column corresponding
-    to a deterministic strategy. 36 comes from 36 possible combinations of
-    (a, b, x, y).
-
-    Structure of a det strat column is as follows. The first 9 are
-    probabilities of getting a and b (values 0,1,2) given x=0, y=0, the next 9
-    are for x=0, y=1, and then x=1, y=0, and finally x=1, y=1.
-    Order of a and b is 00,01,02,10,11,12,20,21,22.
-
-    a gives which triple, b gives position in the triple
-
-    Returns
-    -------
-    matrix : numpy array
-        matrix of deterministic strategies.
-
-    Have n2 blocks of d2 elements totaling n2*d2 elements (for n=2, d=3 this gives
-    4*9 = 36, which is correct)
-
-    Works for arbitary dimension -> do arbitary measurements
+    Get number of permuatations of a0_b0, a1_b1, ..., an_bn
+    gives the number of deterministic strategies
     """
+    arr = np.arange(0, d2, 1)
+    diagonal_values_list = [p for p in itertools.product(arr, repeat=no_measurements)]
+    return diagonal_values_list
+
+
+def get_off_diag_values(diagonal):
+    matrix = np.diag(diagonal)
+    for i in range(no_measurements):
+        bi_value = diagonal[i] % no_dimensions
+
+        for o in range(no_dimensions):
+            if diagonal[i] < (o + 1) * no_dimensions:
+                ai_value = o
+                break
+            #else:
+            #    a_value = no_dimensions - 1
+        # Have ai_value (subsection) & bj_value (pos. in subsec.)
+        for j in range(no_measurements):
+            if i==j:
+                break
+            else:
+                bj_value = diagonal[j] % no_dimensions
+                for o in range(no_dimensions):
+                    if diagonal[j] < (o + 1) * no_dimensions:
+                        aj_value = o
+                        break
+
+            matrix[i, j] = no_dimensions * ai_value + bj_value
+            matrix[j, i] = no_dimensions * aj_value + bi_value
+    
+    return matrix
+
+
+def convert_mat_to_vec(mat):
+
+    vec = np.zeros(n2*d2)
+    count = 0
+    for i in range(no_measurements):
+        for k in range(no_measurements):
+            
+            vec[count*d2 + mat[i,k]] = 1
+            count += 1
+    return vec
+
+
+def matrix_of_det_strats(): # any dimension and number of measurements
 
     no_rows = n2*d2
     no_cols = (no_dimensions**no_measurements)**2
     matrix =  np.zeros((no_rows, no_cols))
-    count = 0
-    #print(no_cols)
-    strategies = []
-    """
-    a = np.zeros(no_dimensions)
-    b = np.zeros(no_dimensions)
+    diag_values = get_all_diag_values()
+    count = 0 
 
-
+    for Tuple in diag_values:
+        strat_mat = get_off_diag_values(Tuple)
+        strat_vec = convert_mat_to_vec(strat_mat)
+        matrix[:, count] = strat_vec
+        count += 1
     
-
-    """# This works for d=3
-    for i in range(d2):
-        xy_00 = i
-        vec1 = np.zeros(d2)
-        vec1[xy_00] = 1
-
-        b0 = xy_00 % no_dimensions
-
-        # Find value of a0
-        for o in range(no_dimensions):
-            if xy_00 < (o + 1) * no_dimensions:
-                a0 = o
-                break
-            else:
-                a0 = no_dimensions - 1
-
-        for iv in range(d2):
-            xy_11 = iv
-            vec4 = np.zeros(d2)
-            vec4[xy_11] = 1
-
-            b1 = xy_11 % no_dimensions
-
-            # Find value of a1
-            for p in range(no_dimensions):
-                if xy_11 < (p+1)*no_dimensions:
-                    a1 = p
-                    break
-                else:
-                    a1 = no_dimensions-1
-
-            #print(a1)
-
-            xy_01 = no_dimensions * a0 + b1
-            xy_10 = no_dimensions * a1 + b0
-
-            # Find vec2 & vec3
-            vec2 = np.zeros(d2)
-            vec2[xy_01] = 1
-            vec3 = np.zeros(d2)
-            vec3[xy_10] = 1
-
-            det_strat = np.concatenate((vec1, vec2, vec3, vec4))
-            matrix[:, count] = det_strat
-            count += 1
-
-            #print(a0, a1, b0, b1)
-
-
-
-    np.savetxt('matrix_of_det_strats.txt', matrix, fmt='%i')
     return matrix
 
 
-def state_36vector(state, Alice_measurements, Bob_measurements):
+def test(mat):
+    """
+    1. Check if column elements sum to n2.
+    
+    2. Check if each segment has 1 one.
+    """
+    
+    for j in range((no_dimensions**no_measurements)**2):
+        vec = mat[:, j]
+        if np.sum(vec) != n2:
+            print("Error 1")
+            return None
+        
+        for k in range(n2): # Loop over segments
+            temp = 0
+            for l in range(d2): # Loop over elements in the segments
+                temp += vec[k*d2+l]
+            if temp != 1:
+                print("Error 2")
+                return None
+
+    print("All good!")
+    return None
+
+
+def state_vector(state, Alice_measurements, Bob_measurements):
     """ This is good for any dimension or number of measurements
     For two measurements per party only
 
@@ -264,6 +265,7 @@ def state_36vector(state, Alice_measurements, Bob_measurements):
     vector = np.zeros(n2*d2)
     count = 0
     vec_count = 0
+
     for a in range(no_measurements):
         for b in range(no_measurements):
             for i in range(a*no_dimensions, (a+1)*no_dimensions):
@@ -276,6 +278,7 @@ def state_36vector(state, Alice_measurements, Bob_measurements):
     return vector
 
 
+#from mosek.fusion import *
 def SDP_opt(state, Alice_measurements, Bob_measurements):
     """
     Find the random robustness for the given state and measurements. Minimise
@@ -301,22 +304,86 @@ def SDP_opt(state, Alice_measurements, Bob_measurements):
     # Make random measurement projectors that we will optimise
     # Use nonneg=True when initialising variable rather then in constraints
     # of SDP.
+    #M = Model()
     r = cp.Variable(nonneg=True)
     s = cp.Variable(((no_dimensions**no_measurements)**2,), nonneg=True)  # q_vec[i] >= 0, sum(q_vec[i]) = 1
     q = cp.Variable(((no_dimensions**no_measurements)**2,), nonneg=True)
 
     # Convert state from computational basis to 36 probability vector
-    state36 = state_36vector(state, Alice_measurements, Bob_measurements)
+    state36 = state_vector(state, Alice_measurements, Bob_measurements)
 
     # Construct the problem.
     objective = cp.Minimize(r)
     # Set the remaining constraints
     constraints = [state36 + (deterministic_matrix @ s) == (deterministic_matrix @ q),
                    cp.sum(q) == 1 + r, cp.sum(s) == r]
-    prob = cp.Problem(objective, constraints)
 
+    prob = cp.Problem(objective, constraints)
+    
     return prob.solve(solver=cp.MOSEK)
 
+
+def calculate(no_games, seed):
+    """
+    Calculate random robustness for no_games.
+
+    Parameters
+    ----------
+    no_games : int
+        number of random games to run.
+
+    Returns
+    -------
+    max_entangled_epsilons : numpy array (floats)
+        Random robustness epsilons for no_games and max entangled state.
+    anomalous_epsilons : numpy array (floats)
+        Random robustness epsilons for no_games and anomalous state.
+
+    """
+    max_entangled_epsilons = np.zeros(no_games)
+    anomalous_epsilons = np.zeros(no_games)
+    np.random.seed(seed)
+
+    for i in tqdm(range(no_games), desc="Running games..."):
+        # Get random projective measurements
+        A_measurements = get_random_measurements()
+        B_measurements = get_random_measurements()
+        # Get max entangled robustness
+        max_entangled_epsilon = SDP_opt(maxEntangledState, A_measurements, B_measurements)
+        max_entangled_epsilons[i] = max_entangled_epsilon
+        # Get anomalous robustness
+        anomalous_epsilon = SDP_opt(anomalousState, A_measurements, B_measurements)
+        anomalous_epsilons[i] = anomalous_epsilon
+
+    return max_entangled_epsilons, anomalous_epsilons
+
+
+def parallel_data_production(no_games, batch_no=0):
+    with mp.Pool() as pool:
+        results = pool.starmap(calculate,
+                               inputs[no_cores * batch_no:no_cores * (batch_no + 1)])  # [no_games_per_core]*no_cores)
+
+    epsilon_max_entangled = np.concatenate([results[n][0] for n in range(no_cores)])
+    epsilon_anomalous = np.concatenate([results[n][1] for n in range(no_cores)])
+
+    with open("ME_out/max entangled epsilons, no games {}, batch {}.npy".format(no_games, batch_no), "wb") as f:
+        np.save(f, epsilon_max_entangled)
+        f.close()
+    with open("anom_out/anomalous epsilons, no games {}, batch {}.npy".format(no_games, batch_no), "wb") as f:
+        np.save(f, epsilon_anomalous)
+        f.close()
+
+    # write_stats("Robustness, no games {}, batch number {}.txt".format(no_games, batch_no), batch_no)
+
+
+def random_numbers(no):
+    rand_nos = np.random.randint(0, int(2 ** 32 - 1), size=no)
+    if len(np.unique(rand_nos)) != no:
+        random_numbers(no)
+
+    return rand_nos
+
+#%% Code block 4
 
 def write_stats(filename, robustness_ME, robustness_anom):
     """
@@ -476,68 +543,16 @@ def plot(max_entangled_state, anomalous_state, no_games, savename=None, leg_loc=
     plt.show()
 
 
-def calculate(no_games, seed):
-    """
-    Calculate random robustness for no_games.
+#%% Code block 5
+def ME_state():
+    
+    state = 0
+    for i in range(no_dimensions):
+        state += (1/np.sqrt(no_dimensions))*qp.tensor(qp.basis(no_dimensions,i), qp.basis(no_dimensions,i))
 
-    Parameters
-    ----------
-    no_games : int
-        number of random games to run.
+    return state
 
-    Returns
-    -------
-    max_entangled_epsilons : numpy array (floats)
-        Random robustness epsilons for no_games and max entangled state.
-    anomalous_epsilons : numpy array (floats)
-        Random robustness epsilons for no_games and anomalous state.
-
-    """
-    max_entangled_epsilons = np.zeros(no_games)
-    anomalous_epsilons = np.zeros(no_games)
-    np.random.seed(seed)
-
-    for i in tqdm(range(no_games), desc="Running games..."):
-        # Get random projective measurements
-        A_measurements = get_random_measurements()
-        B_measurements = get_random_measurements()
-        # Get max entangled robustness
-        max_entangled_epsilon = SDP_opt(maxEntangledState, A_measurements, B_measurements)
-        max_entangled_epsilons[i] = max_entangled_epsilon
-        # Get anomalous robustness
-        anomalous_epsilon = SDP_opt(anomalousState, A_measurements, B_measurements)
-        anomalous_epsilons[i] = anomalous_epsilon
-
-    return max_entangled_epsilons, anomalous_epsilons
-
-
-def parallel_data_production(no_games, batch_no=0):
-    with mp.Pool() as pool:
-        results = pool.starmap(calculate,
-                               inputs[no_cores * batch_no:no_cores * (batch_no + 1)])  # [no_games_per_core]*no_cores)
-
-    epsilon_max_entangled = np.concatenate([results[n][0] for n in range(no_cores)])
-    epsilon_anomalous = np.concatenate([results[n][1] for n in range(no_cores)])
-
-    with open("ME_out/max entangled epsilons, no games {}, batch {}.npy".format(no_games, batch_no), "wb") as f:
-        np.save(f, epsilon_max_entangled)
-        f.close()
-    with open("anom_out/anomalous epsilons, no games {}, batch {}.npy".format(no_games, batch_no), "wb") as f:
-        np.save(f, epsilon_anomalous)
-        f.close()
-
-    # write_stats("Robustness, no games {}, batch number {}.txt".format(no_games, batch_no), batch_no)
-
-
-def random_numbers(no):
-    rand_nos = np.random.randint(0, int(2 ** 32 - 1), size=no)
-    if len(np.unique(rand_nos)) != no:
-        random_numbers(no)
-
-    return rand_nos
-
-
-# ------------------------------- Define variables----------------------------
+# Defining variables
 
 # Set up Qutip variables
 zero = qp.basis(3, 0)
@@ -556,7 +571,7 @@ beta_1 = np.pi / 6
 
 # States
 gamma = (np.sqrt(11) - np.sqrt(3)) / 2  # Maximum non-locality parameter
-maxEntangledState = (1 / np.sqrt(3)) * (zero_zero + one_one + two_two)
+maxEntangledState = ME_state() #(1 / np.sqrt(3)) * (zero_zero + one_one + two_two)
 anomalousState = (1 / np.sqrt(2 + (gamma ** 2))) * (zero_zero + gamma * one_one + two_two)
 # Global variables
 max_mixed_state = (1 / 9) * np.ones(36)
@@ -570,8 +585,10 @@ A_measurements, B_measurements = get_paper_measurements()
 # score_anom = SDP_opt(anomalousState, A_measurements, B_measurements)
 # print("Anomalous =", score_anom)
 
-# ---------------------------------- Main code -------------------------------
+#%% Code block 6
 
+
+# Main code
 
 epsilon_max_entangled = np.zeros(no_measures)
 epsilon_anomalous = np.zeros(no_measures)
@@ -584,7 +601,6 @@ no_games = int(no_measures / no_batches)
 mode = 'Calculate'
 # mode = 'Load'
 if mode == 'Calculate':
-
     if __name__ == '__main__':
         no_cores = mp.cpu_count() - 1
         no_games_per_core = int(no_games / no_cores)
@@ -618,15 +634,4 @@ if mode == 'Calculate':
         no_games = no_measures
         write_stats("Robustness, no games {}, batch all.txt".format(no_measures), epsilon_max_entangled_all,
                     epsilon_anomalous_all)
-        #plot(epsilon_max_entangled_all, epsilon_anomalous_all, no_measures, savename="Robustness")
-
-
-
-
-
-
-
-
-
-
-
+        plot(epsilon_max_entangled_all, epsilon_anomalous_all, no_measures, savename="Robustness")
