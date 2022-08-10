@@ -241,7 +241,7 @@ def state_vector(state, Alice_measurements, Bob_measurements):
     return vector
 
 
-def SDP_opt_old(state, Alice_measurements, Bob_measurements):
+def SDP_opt(state, Alice_measurements, Bob_measurements):
     """
     Find the random robustness for the given state and measurements. Minimise
     epsilon such that (1-epsilon)*state36 + epsilon*max_mixed_state can be
@@ -267,18 +267,17 @@ def SDP_opt_old(state, Alice_measurements, Bob_measurements):
     # Use nonneg=True when initialising variable rather then in constraints
     # of SDP.
     #M = Model()
-    r = cp.Variable(nonneg=True)
-    s = cp.Variable(((no_dimensions**no_measurements)**2,), nonneg=True)  # q_vec[i] >= 0, sum(q_vec[i]) = 1
-    q = cp.Variable(((no_dimensions**no_measurements)**2,), nonneg=True)
+
+    I = cp.Variable(d2*n2)#(no_dimensions**no_measurements)**2))  # q_vec[i] >= 0, sum(q_vec[i]) = 1
 
     # Convert state from computational basis to 36 probability vector
     state_vec = state_vector(state, Alice_measurements, Bob_measurements)
 
     # Construct the problem.
-    objective = cp.Minimize(r)
+    objective = cp.Maximize((I @ state_vec - 1)/2)
+
     # Set the remaining constraints
-    constraints = [state_vec + (D @ s) == (D @ q),
-                   cp.sum(q) == 1 + r, cp.sum(s) == r]
+    constraints = [np.transpose(D) @ I >= -1, np.transpose(D) @ I <= 1]
 
     prob = cp.Problem(objective, constraints)
     
@@ -434,27 +433,6 @@ def calculate(no_games, seed):
     return robustness
 
 
-def analyse(robustness):
-    
-    nonzero_robustness = np.delete(robustness, np.where(robustness < 1e-8))
-
-    mean_robustness = np.mean(robustness)
-    NLV = len(nonzero_robustness) / len(robustness)
-
-    mean_robustness_err = 3*np.mean(robustness) / np.sqrt(len(robustness) - 1)
-    
-    if len(nonzero_robustness) == 0 or len(nonzero_robustness) == 1:
-        cond_mean_robustness = 0
-        cond_mean_robustness_err = 0
-        NLV_err = 0
-        
-    else: 
-        cond_mean_robustness = np.mean(nonzero_robustness)
-        cond_mean_robustness_err = 3*np.mean(nonzero_robustness) / np.sqrt(len(nonzero_robustness) - 1)
-        NLV_err = 3*np.sqrt((NLV-NLV**2)/(len(nonzero_robustness)-1))
-    
-    return mean_robustness, cond_mean_robustness, NLV, mean_robustness_err, cond_mean_robustness_err, NLV_err
-
 
 def random_numbers(no):
     rand_nos = np.random.randint(0, int(2 ** 32 - 1), dtype = np.int64, size=no)
@@ -582,13 +560,40 @@ def parallel_data_production(batch_no=0):
         results = pool.starmap(calculate,
                                inputs[no_cores * batch_no:no_cores * (batch_no + 1)])  # [no_games_per_core]*no_cores)
 
+    with open("../Data/RvsNd{}/robustness, no_games {}, no_meas {}, batch {}.npy".format(no_dimensions, 
+                no_games, no_measurements, batch_no), "rb") as f:
+                np.save(f, results)
+                f.close()
 
-    robustness = np.concatenate([results[n] for n in range(no_cores)])
 
-    mean_robustness, cond_mean_robustness, NLV, mean_robustness_err, cond_mean_robustness_err, NLV_err = analyse(robustness)
-    save(mean_robustness, cond_mean_robustness, NLV, mean_robustness_err, cond_mean_robustness_err, NLV_err, batch_no)
+    #robustness = np.concatenate([results[n] for n in range(no_cores)])
+
+    #mean_robustness, cond_mean_robustness, NLV, mean_robustness_err, cond_mean_robustness_err, NLV_err = analyse(robustness)
+    #save(mean_robustness, cond_mean_robustness, NLV, mean_robustness_err, cond_mean_robustness_err, NLV_err, batch_no)
 
     # write_stats("Robustness, no games {}, batch number {}.txt".format(no_games, batch_no), batch_no)
+
+
+def analyse(robustness):
+    
+    nonzero_robustness = np.delete(robustness, np.where(robustness < 1e-8))
+
+    mean_robustness = np.mean(robustness)
+    NLV = len(nonzero_robustness) / len(robustness)
+
+    mean_robustness_err = 3*np.mean(robustness) / np.sqrt(len(robustness) - 1)
+    
+    if len(nonzero_robustness) == 0 or len(nonzero_robustness) == 1:
+        cond_mean_robustness = 0
+        cond_mean_robustness_err = 0
+        NLV_err = 0
+        
+    else: 
+        cond_mean_robustness = np.mean(nonzero_robustness)
+        cond_mean_robustness_err = 3*np.mean(nonzero_robustness) / np.sqrt(len(nonzero_robustness) - 1)
+        NLV_err = 3*np.sqrt((NLV-NLV**2)/(len(nonzero_robustness)-1))
+    
+    return mean_robustness, cond_mean_robustness, NLV, mean_robustness_err, cond_mean_robustness_err, NLV_err
 
 
 def order(entanglement, ydata):
@@ -624,6 +629,7 @@ n2 = no_measurements**2
 max_ent_state = ME_state()
 D = matrix_of_det_strats()
 
+robustness = []
 entanglement_all = np.array([])
 mean_robustness_all = np.array([])
 cond_mean_robustness_all = np.array([])
@@ -646,20 +652,29 @@ if mode == 'calculate':
         print("Number of cores = " + str(no_cores))
         print("Number of batches = " + str(no_batches) + "\n")
 
-        #for i in range(6,no_batches):
-        #    print("Batch number = " + str(i))
-        #    parallel_data_production(i)
+        for i in range(no_batches):
+            print("Batch number = " + str(i))
+            parallel_data_production(i)
     
         for batch_no in range(no_batches):
-            mean_robustness, cond_mean_robustness, NLV, mean_robustness_err, cond_mean_robustness_err, NLV_err = load(no_measurements, batch_no)
-            
-            mean_robustness_all = np.append(mean_robustness_all, mean_robustness)
-            cond_mean_robustness_all = np.append(cond_mean_robustness_all, cond_mean_robustness)
-            NLV_all = np.append(NLV_all, NLV)
-            mean_robustness_err_all = np.append(mean_robustness_err_all, mean_robustness_err)
-            cond_mean_robustness_err_all = np.append(cond_mean_robustness_err_all, cond_mean_robustness_err)
-            NLV_err_all = np.append(NLV_err_all, NLV_err)
+            with open("../Data/RvsNd{}/robustness, no_games {}, no_meas {}, batch {}.npy".format(no_dimensions, 
+                no_games, no_measurements, batch_no), "rb") as f:
+                R = np.load(f)
+                f.close()
+            robustness = np.concatenate(robustness, R)
 
+        mean_robustness_all, cond_mean_robustness_all, NLV_all, mean_robustness_err_all, cond_mean_robustness_err_all, NLV_err_all = analyse(robustness)
+        #save(mean_robustness, cond_mean_robustness, NLV, mean_robustness_err, cond_mean_robustness_err, NLV_err, batch_no)
+
+        """
+        mean_robustness, cond_mean_robustness, NLV, mean_robustness_err, cond_mean_robustness_err, NLV_err = load(no_measurements, batch_no)
+        mean_robustness_all = np.append(mean_robustness_all, mean_robustness)
+        cond_mean_robustness_all = np.append(cond_mean_robustness_all, cond_mean_robustness)
+        NLV_all = np.append(NLV_all, NLV)
+        mean_robustness_err_all = np.append(mean_robustness_err_all, mean_robustness_err)
+        cond_mean_robustness_err_all = np.append(cond_mean_robustness_err_all, cond_mean_robustness_err)
+        NLV_err_all = np.append(NLV_err_all, NLV_err)
+        """
         save_all(mean_robustness_all, cond_mean_robustness_all, NLV_all, mean_robustness_err_all, cond_mean_robustness_err_all, NLV_err_all)
         print('saved all')
         #plot(NLV_all, NLV_err_all, "NLV", "NLV vs Entanglement")
