@@ -7,33 +7,33 @@ Created on Mon Aug  8 10:21:50 2022
 """
 import matplotlib.pyplot as plt
 import numpy as np
-no_dimensions = 3
+no_dimensions = 2
 no_measurements = 2
 no_games = 10000
 
 def load_all(no_measurements):
 
-    with open("RvsNd{}/Mean robustness, no_games {}, no_meas {}, all.npy".format(no_dimensions, no_games, no_measurements), "rb") as f:
+    with open("../Data/RvsNd{}/Mean robustness, no_games {}, no_meas {}, all.npy".format(no_dimensions, no_games, no_measurements), "rb") as f:
         mean_robustness = np.load(f)
         f.close()
         
-    with open("RvsNd{}/Conditional mean robustness, no_games {}, no_meas {}, all.npy".format(no_dimensions, no_games, no_measurements), "rb") as f:
+    with open("../Data/RvsNd{}/Conditional mean robustness, no_games {}, no_meas {}, all.npy".format(no_dimensions, no_games, no_measurements), "rb") as f:
         cond_mean_robustness = np.load(f)
         f.close()
         
-    with open("RvsNd{}/NLV, no_games {}, no_meas {}, all.npy".format(no_dimensions, no_games, no_measurements), "rb") as f:
+    with open("../Data/RvsNd{}/NLV, no_games {}, no_meas {}, all.npy".format(no_dimensions, no_games, no_measurements), "rb") as f:
         NLV = np.load(f)
         f.close()
         
-    with open("RvsNd{}/Mean robustness error, no_games {}, no_meas {}, all.npy".format(no_dimensions, no_games, no_measurements), "rb") as f:
+    with open("../Data/RvsNd{}/Mean robustness error, no_games {}, no_meas {}, all.npy".format(no_dimensions, no_games, no_measurements), "rb") as f:
         mean_robustness_err = np.load(f)
         f.close()
         
-    with open("RvsNd{}/Conditional mean robustness error, no_games {}, no_meas {}, all.npy".format(no_dimensions, no_games, no_measurements), "rb") as f:
+    with open("../Data/RvsNd{}/Conditional mean robustness error, no_games {}, no_meas {}, all.npy".format(no_dimensions, no_games, no_measurements), "rb") as f:
         cond_mean_robustness_err = np.load(f)
         f.close()
         
-    with open("RvsNd{}/NLV error, no_games {}, no_meas {}, all.npy".format(no_dimensions, no_games, no_measurements), "rb") as f:
+    with open("../Data/RvsNd{}/NLV error, no_games {}, no_meas {}, all.npy".format(no_dimensions, no_games, no_measurements), "rb") as f:
         NLV_err = np.load(f)
         f.close()
 
@@ -50,7 +50,7 @@ cond_mean_err = []
 NLVs = []
 NLVs_err = []
 
-N = [2,3,4]#,5,6]
+N = [2,3,4,5]#,6]
 
 for n in N:
     mean_robustness, cond_mean_robustness, NLV, mean_robustness_err, cond_mean_robustness_err, NLV_err = load_all(n)
@@ -112,7 +112,7 @@ def new_plot_for_N(xdata, y1, y2, y1_err, y2_err,
     
     i = 0
     for xy in zip(xdata, y1):
-        if i>=len(xdata)-2:
+        if i>=len(xdata)-1:
             ax.annotate("NLV="+str(NLVs[i])+'±'+str(NLVs_err[i]), xy=[xy[0]*0.85, xy[1]*1.04], textcoords='data')
         else:
             ax.annotate("NLV="+str(NLVs[i])+'±'+str(NLVs_err[i]), xy=[xy[0]*1.07, xy[1]*1.02], textcoords='data')
@@ -130,4 +130,4 @@ def new_plot_for_N(xdata, y1, y2, y1_err, y2_err,
     
 
 new_plot_for_N(N, mean_robs, conditional_means, mean_rob_err, cond_mean_err, 
-    "Mean Robustness", "Conditional Mean Robustness", savename="Robustness vs number of measurements, d={}".format(no_dimensions))
+    "Mean Robustness", None, savename="Robustness vs number of measurements, d={}".format(no_dimensions))
