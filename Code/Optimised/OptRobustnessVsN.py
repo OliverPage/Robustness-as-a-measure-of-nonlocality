@@ -28,9 +28,9 @@ try:
 
 except:
     no_dimensions = 2
-    no_measurements = 2
-    no_games = int(1e4)
-
+    no_measurements = 4
+    no_games = int(1e2)
+    
 
 
 
@@ -246,7 +246,8 @@ def state_vector(state, Alice_measurements, Bob_measurements):
 
     return vector
 
-def cvxpy_state_vector(state, Alice_measurements, Bob):
+
+def cvxpy_state_vector(state, Alice_measurements, Bob): # Unused
     """ This is good for any dimension or number of measurements
     For two measurements per party only
 
@@ -432,7 +433,7 @@ def optimise_bob_measurements(Alice, state, Bell):
     #print("Reformatted measurement arrays")
     
     # Configure optimisation 
-    objective = cp.Maximize(Bob_objective(Bell, Alice_formatted, Bob, state)) # WRONG OBJECTIVE (I think)
+    objective = cp.Maximize(Bob_objective(Bell, Alice_formatted, Bob, state))
     #state_vec = cvxpy_state_vector(state, Alice, Bob)
     #objective = cp.Maximize((Bell @ state_vec - 1)/2)
     #print("Set objective")
@@ -460,8 +461,7 @@ def optimise_bob_measurements(Alice, state, Bell):
             Bob_reformatted.append(qp.Qobj(Bob[row][i].value))
     
     return r, Bell, Bob_reformatted
-
-    
+ 
 
 def optimise_robustness(state):
     
@@ -471,8 +471,8 @@ def optimise_robustness(state):
     
     #2) Calculate robustness given Alice and Bob, extract Bell operator
     robustness, Bell = SDP_opt(max_ent_state, Alice, Bob, get_Bell=True)
-    print("Get first Bell vector")
-    print(robustness, Bell)
+    #print("Get first Bell vector")
+    #print(robustness, Bell)
     old_robustness = 999
     count = 0
     while count<10: #abs(temp-robustness)>1e-8:
@@ -484,22 +484,14 @@ def optimise_robustness(state):
         #print(count, new_robustness, Bell)
     
         
-        print("Robustness:", robustness)
+        #print("Robustness:", robustness)
         #print("Old Robustness:", old_robustness)
         
-        
-        
-        
-    
-        print("count:", count)
+        #print("count:", count)
         
         count +=1
         
-    return robustness, Bell, Bob
-
-    
-
-
+    return robustness#, Bell, Bob
 
 
 def SDP_opt(state, Alice_measurements, Bob_measurements, get_Bell=False):
@@ -690,11 +682,11 @@ def calculate(no_games, seed):
     robustness = np.zeros(no_games)
     for i in tqdm(range(no_games), desc = "Generating robustness..."):
         # Get random projective measurements
-        A_measurements = get_random_measurements()
-        B_measurements = get_random_measurements()
+        #A_measurements = get_random_measurements()
+        #B_measurements = get_random_measurements()
         
         # Get max entangled robustness
-        robustness[i] = SDP_opt(max_ent_state, A_measurements, B_measurements)
+        robustness[i] = optimise_robustness(max_ent_state) #SDP_opt(max_ent_state, A_measurements, B_measurements)
 
     return robustness
 
@@ -709,81 +701,81 @@ def random_numbers(no):
 
 def save(mean_robustness, cond_mean_robustness, NLV, mean_robustness_err, cond_mean_robustness_err, NLV_err, batch_no):
     
-    with open("../Data/RvsNd{}/Mean robustness, no_games {}, no_meas {}, batch {}.npy".format(no_dimensions, no_games, no_measurements, batch_no), "wb") as f:
+    with open("../../Data/OptRvsNd{}/Mean robustness, no_games {}, no_meas {}, batch {}.npy".format(no_dimensions, no_games, no_measurements, batch_no), "wb") as f:
         np.save(f, mean_robustness)
         f.close()
             
-    with open("../Data/RvsNd{}/Conditional mean robustness, no_games {}, no_meas {}, batch {}.npy".format(no_dimensions, no_games, no_measurements, batch_no), "wb") as f:
+    with open("../../Data/OptRvsNd{}/Conditional mean robustness, no_games {}, no_meas {}, batch {}.npy".format(no_dimensions, no_games, no_measurements, batch_no), "wb") as f:
         np.save(f, cond_mean_robustness)
         f.close()
         
-    with open("../Data/RvsNd{}/NLV, no_games {}, no_meas {}, batch {}.npy".format(no_dimensions, no_games, no_measurements, batch_no), "wb") as f:
+    with open("../../Data/OptRvsNd{}/NLV, no_games {}, no_meas {}, batch {}.npy".format(no_dimensions, no_games, no_measurements, batch_no), "wb") as f:
         np.save(f, NLV)
         f.close()
         
-    with open("../Data/RvsNd{}/Mean robustness error, no_games {}, no_meas {}, batch {}.npy".format(no_dimensions, no_games, no_measurements, batch_no), "wb") as f:
+    with open("../../Data/OptRvsNd{}/Mean robustness error, no_games {}, no_meas {}, batch {}.npy".format(no_dimensions, no_games, no_measurements, batch_no), "wb") as f:
         np.save(f, mean_robustness_err)
         f.close()
             
-    with open("../Data/RvsNd{}/Conditional mean robustness error, no_games {}, no_meas {}, batch {}.npy".format(no_dimensions, no_games, no_measurements, batch_no), "wb") as f:
+    with open("../../Data/OptRvsNd{}/Conditional mean robustness error, no_games {}, no_meas {}, batch {}.npy".format(no_dimensions, no_games, no_measurements, batch_no), "wb") as f:
         np.save(f, cond_mean_robustness_err)
         f.close()
         
-    with open("../Data/RvsNd{}/NLV error, no_games {}, no_meas {}, batch {}.npy".format(no_dimensions, no_games, no_measurements, batch_no), "wb") as f:
+    with open("../../Data/OptRvsNd{}/NLV error, no_games {}, no_meas {}, batch {}.npy".format(no_dimensions, no_games, no_measurements, batch_no), "wb") as f:
         np.save(f, NLV_err)
         f.close()
         
         
 def save_all(mean_robustness, cond_mean_robustness, NLV, mean_robustness_err, cond_mean_robustness_err, NLV_err):
     
-    with open("../Data/RvsNd{}/Mean robustness, no_games {}, no_meas {}, all.npy".format(no_dimensions, no_games, no_measurements), "wb") as f:
+    with open("../../Data/OptRvsNd{}/Mean robustness, no_games {}, no_meas {}, all.npy".format(no_dimensions, no_games, no_measurements), "wb") as f:
         np.save(f, mean_robustness)
         f.close()
             
-    with open("../Data/RvsNd{}/Conditional mean robustness, no_games {}, no_meas {}, all.npy".format(no_dimensions, no_games, no_measurements), "wb") as f:
+    with open("../../Data/OptRvsNd{}/Conditional mean robustness, no_games {}, no_meas {}, all.npy".format(no_dimensions, no_games, no_measurements), "wb") as f:
         np.save(f, cond_mean_robustness)
         f.close()
         
-    with open("../Data/RvsNd{}/NLV, no_games {}, no_meas {}, all.npy".format(no_dimensions, no_games, no_measurements), "wb") as f:
+    with open("../../Data/OptRvsNd{}/NLV, no_games {}, no_meas {}, all.npy".format(no_dimensions, no_games, no_measurements), "wb") as f:
         np.save(f, NLV)
         f.close()
         
-    with open("../Data/RvsNd{}/Mean robustness error, no_games {}, no_meas {}, all.npy".format(no_dimensions, no_games, no_measurements), "wb") as f:
+    with open("../../Data/OptRvsNd{}/Mean robustness error, no_games {}, no_meas {}, all.npy".format(no_dimensions, no_games, no_measurements), "wb") as f:
         np.save(f, mean_robustness_err)
         f.close()
             
-    with open("../Data/RvsNd{}/Conditional mean robustness error, no_games {}, no_meas {}, all.npy".format(no_dimensions, no_games, no_measurements), "wb") as f:
+    with open("../../Data/OptRvsNd{}/Conditional mean robustness error, no_games {}, no_meas {}, all.npy".format(no_dimensions, no_games, no_measurements), "wb") as f:
         np.save(f, cond_mean_robustness_err)
         f.close()
         
-    with open("../Data/RvsNd{}/NLV error, no_games {}, no_meas {}, all.npy".format(no_dimensions, no_games, no_measurements), "wb") as f:
+    with open("../../Data/OptRvsNd{}/NLV error, no_games {}, no_meas {}, all.npy".format(no_dimensions, no_games, no_measurements), "wb") as f:
         np.save(f, NLV_err)
         f.close()
 
 
 def load(no_measurements, batch_no):
 
-    with open("../Data/RvsNd{}/Mean robustness, no_games {}, no_meas {}, batch {}.npy".format(no_dimensions, no_games, no_measurements, batch_no), "rb") as f:
+    with open("../../Data/OptRvsNd{}/Mean robustness, no_games {}, no_meas {}, batch {}.npy".format(no_dimensions, no_games, no_measurements, batch_no), "rb") as f:
         mean_robustness = np.load(f)
         f.close()
         
-    with open("../Data/RvsNd{}/Conditional mean robustness, no_games {}, no_meas {}, batch {}.npy".format(no_dimensions, no_games, no_measurements, batch_no), "rb") as f:
+    with open("../../Data/OptRvsNd{}/Conditional mean robustness, no_games {}, no_meas {}, batch {}.npy".format(no_dimensions, no_games, no_measurements, batch_no), "rb") as f:
         cond_mean_robustness = np.load(f)
         f.close()
         
-    with open("../Data/RvsNd{}/NLV, no_games {}, no_meas {}, batch {}.npy".format(no_dimensions, no_games, no_measurements, batch_no), "rb") as f:
+    with open("../../Data/OptRvsNd{}/NLV, no_games {}, no_meas {}, batch {}.npy".format(no_dimensions, no_games, no_measurements, batch_no), "rb") as f:
         NLV = np.load(f)
         f.close()
         
-    with open("../Data/RvsNd{}/Mean robustness error, no_games {}, no_meas {}, batch {}.npy".format(no_dimensions, no_games, no_measurements, batch_no), "rb") as f:
+    with open("../../Data/OptRvsNd{}/Mean robustness error, no_games {}, no_meas {}, batch {}.npy".format(no_dimensions, no_games, no_measurements, batch_no), "rb") as f:
         mean_robustness_err = np.load(f)
         f.close()
         
-    with open("../Data/RvsNd{}/Conditional mean robustness error, no_games {}, no_meas {}, batch {}.npy".format(no_dimensions, no_games, no_measurements, batch_no), "rb") as f:
+    with open("../../Data/OptRvsNd{}/Conditional mean robustness error, no_games {}, no_meas {}, batch {}.npy".format(no_dimensions, no_games, no_measurements, batch_no), "rb") as f:
         cond_mean_robustness_err = np.load(f)
         f.close()
         
-    with open("../Data/RvsNd{}/NLV error, no_games {}, no_meas {}, batch {}.npy".format(no_dimensions, no_games, no_measurements, batch_no), "rb") as f:
+    with open("../../Data/OptRvsNd{}/NLV error, no_games {}, no_meas {}, batch {}.npy".format(no_dimensions, no_games, no_measurements, batch_no), "rb") as f:
         NLV_err = np.load(f)
         f.close()
 
@@ -792,27 +784,27 @@ def load(no_measurements, batch_no):
 
 def load_all(no_measurements):
 
-    with open("../Data/RvsNd{}/Mean robustness, no_games {}, no_meas {}, all.npy".format(no_dimensions, no_games, no_measurements), "rb") as f:
+    with open("../../Data/OptRvsNd{}/Mean robustness, no_games {}, no_meas {}, all.npy".format(no_dimensions, no_games, no_measurements), "rb") as f:
         mean_robustness = np.load(f)
         f.close()
         
-    with open("../Data/RvsNd{}/Conditional mean robustness, no_games {}, no_meas {}, all.npy".format(no_dimensions, no_games, no_measurements), "rb") as f:
+    with open("../../Data/OptRvsNd{}/Conditional mean robustness, no_games {}, no_meas {}, all.npy".format(no_dimensions, no_games, no_measurements), "rb") as f:
         cond_mean_robustness = np.load(f)
         f.close()
         
-    with open("../Data/RvsNd{}/NLV, no_games {}, no_meas {}, all.npy".format(no_dimensions, no_games, no_measurements), "rb") as f:
+    with open("../../Data/OptRvsNd{}/NLV, no_games {}, no_meas {}, all.npy".format(no_dimensions, no_games, no_measurements), "rb") as f:
         NLV = np.load(f)
         f.close()
         
-    with open("../Data/RvsNd{}/Mean robustness error, no_games {}, no_meas {}, all.npy".format(no_dimensions, no_games, no_measurements), "rb") as f:
+    with open("../../Data/OptRvsNd{}/Mean robustness error, no_games {}, no_meas {}, all.npy".format(no_dimensions, no_games, no_measurements), "rb") as f:
         mean_robustness_err = np.load(f)
         f.close()
         
-    with open("../Data/RvsNd{}/Conditional mean robustness error, no_games {}, no_meas {}, all.npy".format(no_dimensions, no_games, no_measurements), "rb") as f:
+    with open("../../Data/OptRvsNd{}/Conditional mean robustness error, no_games {}, no_meas {}, all.npy".format(no_dimensions, no_games, no_measurements), "rb") as f:
         cond_mean_robustness_err = np.load(f)
         f.close()
         
-    with open("../Data/RvsNd{}/NLV error, no_games {}, no_meas {}, all.npy".format(no_dimensions, no_games, no_measurements), "rb") as f:
+    with open("../../Data/OptRvsNd{}/NLV error, no_games {}, no_meas {}, all.npy".format(no_dimensions, no_games, no_measurements), "rb") as f:
         NLV_err = np.load(f)
         f.close()
 
@@ -825,9 +817,14 @@ def parallel_data_production(batch_no=0):
         results = pool.starmap(calculate,
                                inputs[no_cores * batch_no:no_cores * (batch_no + 1)])  # [no_games_per_core]*no_cores)
 
-    with open("../Data/RvsNd{}/robustness, no_games {}, no_meas {}, batch {}.npy".format(no_dimensions, 
-                no_games, no_measurements, batch_no), "rb") as f:
-                np.save(f, results)
+    # Recast into 1D array of robustness values
+    results_array = np.array([])
+    for i in range(no_cores):
+        results_array = np.concatenate((results_array, results[i]))
+    # Save full dataset of robustness values
+    with open("../../Data/OptRvsNd{}/robustness, no_games {}, no_meas {}, batch {}.npy".format(no_dimensions, 
+                no_games, no_measurements, batch_no), "wb") as f:
+                np.save(f, results_array)
                 f.close()
 
 
@@ -840,6 +837,8 @@ def parallel_data_production(batch_no=0):
 
 
 def analyse(robustness):
+    
+    robustness[robustness<1e-10] = 0
     
     nonzero_robustness = np.delete(robustness, np.where(robustness < 1e-8))
 
@@ -895,7 +894,7 @@ max_ent_state = ME_state()
 D = matrix_of_det_strats()
 identity = np.identity(no_dimensions)
 
-robustness = []
+robustness = np.array([])
 entanglement_all = np.array([])
 mean_robustness_all = np.array([])
 cond_mean_robustness_all = np.array([])
@@ -904,14 +903,15 @@ mean_robustness_err_all = np.array([])
 cond_mean_robustness_err_all = np.array([])
 NLV_err_all = np.array([])
 
-mode = 'test'
+mode = 'calculate'
 
 if mode=='test':
-    r, bell, bob = optimise_robustness(max_ent_state)
+    #r, bell, bob = optimise_robustness(max_ent_state)
+    r = optimise_robustness(max_ent_state)
     print("\nEnd:")
     print(f"Robustness = {r}")
     #print(f"Bob = {bob}")
-    print(f"Bell = {bell}")
+    #print(f"Bell = {bell}")
     """
     Bob, rob, Bell = Bob_opt(max_ent_state)
     print("\nEnd:")
@@ -927,6 +927,7 @@ elif mode == 'calculate':
         no_games_per_core = int(no_games_per_batch/no_cores)
         random_seeds = random_numbers(no_cores * no_batches)
         inputs = [(no_games_per_core, seed) for seed in random_seeds]
+        print("Number fo dimensions = {}".format(no_dimensions))
         print("Number of measurements =", no_measurements)
         print("Number of unique random seeds = " + str(len(list(zip(*inputs))[1])))
         print("Number of cores = " + str(no_cores))
@@ -937,11 +938,11 @@ elif mode == 'calculate':
             parallel_data_production(i)
     
         for batch_no in range(no_batches):
-            with open("../Data/RvsNd{}/robustness, no_games {}, no_meas {}, batch {}.npy".format(no_dimensions, 
+            with open("../../Data/OptRvsNd{}/robustness, no_games {}, no_meas {}, batch {}.npy".format(no_dimensions, 
                 no_games, no_measurements, batch_no), "rb") as f:
                 R = np.load(f)
                 f.close()
-            robustness = np.concatenate(robustness, R)
+            robustness = np.concatenate((robustness, R))
 
         mean_robustness_all, cond_mean_robustness_all, NLV_all, mean_robustness_err_all, cond_mean_robustness_err_all, NLV_err_all = analyse(robustness)
         #save(mean_robustness, cond_mean_robustness, NLV, mean_robustness_err, cond_mean_robustness_err, NLV_err, batch_no)
@@ -973,91 +974,6 @@ elif mode == 'load':
     #plot_two_axis(entanglement, mean_robustness, cond_mean_robustness, mean_robustness_err, cond_mean_robustness_err, 
     #    "Mean robustness", "Conditional mean robustness", title="Robustness vs Entanglement", savename="Robustness vs Entanglement", log = False)
     
-#%%
-
-else:
-    #import matplotlib as plt
-    #import numpy as np
-    
-    mean_robs = []
-    conditional_means = []
-    mean_rob_err = []
-    cond_mean_err = []
-    NLVs = []
-    NLVs_err = []
-    
-    N = [2,3,4]#,5]#,6]
-    
-    for n in N:
-        mean_robustness, cond_mean_robustness, NLV, mean_robustness_err, cond_mean_robustness_err, NLV_err = load_all(n)
-        mean_robs.append(mean_robustness)
-        conditional_means.append(cond_mean_robustness[0])
-        if n!=6:
-            NLVs.append(NLV[0])
-            mean_rob_err.append(mean_robustness_err[0])
-            cond_mean_err.append(cond_mean_robustness_err[0])
-            NLVs_err.append(NLV_err[0])
-        else:
-            NLVs.append(NLV)
-            mean_rob_err.append(mean_robustness_err)
-            cond_mean_err.append(cond_mean_robustness_err)
-            NLVs_err.append(NLV_err)
-
-    
-    mean_robs = np.array(mean_robs)
-    mean_robs = np.reshape(mean_robs, len(mean_robs))
-    conditional_means = np.array(conditional_means)
-    mean_rob_err = np.array(mean_rob_err)
-    cond_mean_err = np.array(cond_mean_err)
-    NLVs = np.array(NLVs)
-    NLVs_err = np.array(NLVs_err)
-    
-    
-    def plot_for_N(xdata, y1, y2, y1_err, y2_err, 
-        y_label, y2_label, title=None, savename=None, log = False):
-    
-        # Remove the if-statement for new data
-        # if ylabel == "NLV":
-        #     y_err = 3* y_err * np.sqrt((state_samples-1)/(no_games-1))
-    
-        fig, ax1 = plt.subplots()
-        ax1.set_xlabel('Number of Measurements')
-        ax1.set_ylabel(y_label)
-        if log == True:
-            ax1.semilogy(xdata, y1, 'o', color='tab:red', label = "Mean")#, linestyle = "None")
-        else:
-            ax1.plot(xdata, y1, 'o', color='tab:red', label = "Mean")#, linestyle = "None")
-    
-        ax1.errorbar(xdata, y1, y1_err, color =  'tab:red')#, linestyle = "None")
-    
-        # Do second y axis
-        ax2 = ax1.twinx()
-        ax2.set_ylabel(y2_label)
-        if log == True:
-            ax2.semilogy(xdata, y2, 'o', color ='tab:blue', label = "Cond mean")#, linestyle = "None")
-        else:
-            ax2.plot(xdata, y2, 'o', color ='tab:blue', label = "Cond mean")#, linestyle = "None")
-    
-        ax2.errorbar(xdata, y2, y2_err, color = 'tab:blue')#, linestyle = "None")
-    
-        # Combine legend data
-        h1, l1 = ax1.get_legend_handles_labels()
-        h2, l2 = ax2.get_legend_handles_labels()
-        ax1.legend(h1+h2, l1+l2, loc=2)
-        
-        ax1.grid()
-    
-        if title!=None:
-            plt.title(title)
-    
-        if savename!=None:
-            plt.savefig(savename+'.pdf')
-    
-        plt.show()
-    
-    plot_for_N(N, mean_robs, conditional_means, mean_rob_err, cond_mean_err, 
-        "Mean Robustness", "Conditional Mean Robustness", 
-        title="Robustness vs number of measurements, d = {}".format(no_dimensions), savename="Robustness vs number of measurements, d={}".format(no_dimensions), log = False)
-
+#%% Plotting
 
     

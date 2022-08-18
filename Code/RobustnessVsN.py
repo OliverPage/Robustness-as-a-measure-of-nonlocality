@@ -27,9 +27,9 @@ try:
     no_games = int(sys.argv[3])
 
 except:
-    no_dimensions = 3
-    no_measurements = 5
-    no_games = int(1e4)
+    no_dimensions = 2
+    no_measurements = 2
+    no_games = int(1e2)
 
 
 
