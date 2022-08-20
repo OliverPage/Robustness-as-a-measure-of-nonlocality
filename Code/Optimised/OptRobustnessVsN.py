@@ -295,7 +295,6 @@ def cvxpy_state_vector(state, Alice_measurements, Bob): # Unused
 #----------------- Robustness OPtimisation for Bob  
 # max_ent_state
 def trace_for_sigma_by(A, state):
-    # Will clean this up when I know it works...
     A_tensor_Id = qp.tensor(A, qp.qeye(no_dimensions))
     state_proj = state*state.dag()
     thing_to_trace = A_tensor_Id * state_proj
@@ -321,13 +320,7 @@ def Bob_objective(Bell, Alice, Bob, state):
     for b in range(no_measurements):
         for y in range(no_dimensions):
             thing_to_trace += sigma_by(Bell, Alice, state, b, y) @ Bob[b][y]  # inputs for sigma_by
-    #print(thing_to_trace)
-    traced = 0
-    for i in range(no_dimensions):
-        traced += thing_to_trace[i][i]
-    traced = cp.real(traced)
-    #print(traced)
-    return traced#np.trace(thing_to_trace)
+    return cp.real(cp.trace(thing_to_trace))
     
 
 def init_Bob_opt(state, Alice=None, Bob=None):
@@ -444,7 +437,8 @@ def optimise_bob_measurements(Alice, state, Bell):
         for b in range(no_dimensions):
             constraints.append(Bob[y][b]>>0)
             sum_const += Bob[y][b]
-        constraints.append(sum_const<<identity)
+        
+        #constraints.append(sum_const<<identity)
         
     #print(constraints)
     #print("Set constraints")
@@ -463,19 +457,24 @@ def optimise_bob_measurements(Alice, state, Bell):
     return r, Bell, Bob_reformatted
  
 
-def optimise_robustness(state):
+def optimise_robustness(state, Alice=None, Bob=None, return_all=False):
     
     #1) Get random measurements for Alice and Bob
-    Alice = get_random_measurements()
-    Bob = get_random_measurements()
+    if Alice==None:
+        Alice = get_random_measurements()
+    if Bob==None:
+        Bob = get_random_measurements()
     
     #2) Calculate robustness given Alice and Bob, extract Bell operator
     robustness, Bell = SDP_opt(max_ent_state, Alice, Bob, get_Bell=True)
+    print("First robustness:", robustness)
     #print("Get first Bell vector")
     #print(robustness, Bell)
-    old_robustness = 999
-    count = 0
-    while count<10: #abs(temp-robustness)>1e-8:
+    #old_robustness = 999
+    robustness_list = [999, robustness]
+
+    while abs(robustness_list[-2]-robustness_list[-1])>1e-8:  #abs(old_robustness-robustness)>1e-8: #abs(temp-robustness)>1e-8:
+        #old_robustness = robustness
         #3) Optimise for Bob
         r, temp_Bell, Bob = optimise_bob_measurements(Alice, state, Bell)
         
@@ -483,15 +482,44 @@ def optimise_robustness(state):
         robustness, Bell = SDP_opt(state, Alice, Bob, True)
         #print(count, new_robustness, Bell)
     
-        
-        #print("Robustness:", robustness)
+        #temp = robustness
+        print("Robustness:", robustness)
         #print("Old Robustness:", old_robustness)
-        
-        #print("count:", count)
-        
-        count +=1
-        
+        robustness_list.append(robustness)
+    
+    print(robustness_list)
+    
+    if return_all:
+        return robustness, Bell, Bob
+    
     return robustness#, Bell, Bob
+
+
+def test_optimised_robustness():
+    Alice = get_random_measurements()
+    Bob = get_random_measurements()
+    
+
+    rob_array = []
+    Bob_array = []
+    Bell_array = []
+    
+    for i in range(10):
+        b = get_random_measurements()
+        
+        rob, Bell, new_Bob = optimise_robustness(max_ent_state, Alice, b, return_all=True)
+        
+        rob_array.append(rob)
+        Bob_array.append(new_Bob)
+        Bell_array.append(Bell)
+    
+    for i in rob_array:
+        if not np.isclose(i, max(rob_array)):
+            print("ERROR")
+            print(max(rob_array), i)
+        
+    return rob_array, Bob_array, Bell_array
+
 
 
 def SDP_opt(state, Alice_measurements, Bob_measurements, get_Bell=False):
@@ -903,7 +931,7 @@ mean_robustness_err_all = np.array([])
 cond_mean_robustness_err_all = np.array([])
 NLV_err_all = np.array([])
 
-mode = 'calculate'
+mode = 'test'
 
 if mode=='test':
     #r, bell, bob = optimise_robustness(max_ent_state)
