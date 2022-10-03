@@ -1,0 +1,1009 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Tue Sep 13 17:05:35 2022
+
+@author: npoljakov
+"""
+
+
+# Imports and required parameters
+
+import numpy as np
+import cvxpy as cp
+import qutip as qp
+from scipy.stats import unitary_group
+import matplotlib.pyplot as plt
+import seaborn as sns
+from tqdm import tqdm
+import datetime
+import itertools
+import multiprocessing as mp
+import sys
+from scipy.optimize import curve_fit
+from sklearn.metrics import r2_score
+
+# Defining functions
+
+def get_random_measurements():
+    """
+    Generate random projective measurements by taking the rows of unitary
+    matrices generated using the Haar measure.
+    Returns:
+        measurements (numpy array): 6 projection matrices. The first three
+        correspond to the input 0. The last three correspond to the input 1.
+    """
+    measurements = []
+
+    for n in range(no_measurements):
+        matrix = unitary_group.rvs(no_dimensions)
+        for d in range(no_dimensions):
+            vector = qp.Qobj(matrix[d])
+            projector = vector * vector.dag()
+            measurements.append(projector)
+
+    return measurements
+
+
+def sigma_ax(M_proj, state):
+    """
+    sigma_(a|x) = tr_A [(M_(a|x) tensor I)|state><state|]
+    Parameters
+    ----------
+    M : qutip.qobj.Qobj
+        Alice's measurement vector (matrix).
+    state : qutip.qobj.Qobj
+        the state vector (matrix).
+    Returns
+    -------
+    qutip.qobj.Qobj
+        sigma_(a|x) of the given set up.
+    """
+    # Get density operator
+    state_projector = state * state.dag()
+    # Construct sigma object
+    # print(M_proj, qp.qeye(no_dimensions))
+    M_tensor_I = qp.tensor(M_proj, qp.qeye(no_dimensions))
+    thing_to_trace = M_tensor_I * state_projector
+
+    return thing_to_trace.ptrace(1)
+
+
+def probability(state, Alice_measurement, Bob_proj):
+    """
+    P(a,b|x,y) = <state|M_(a|x) tensor M_(b|y)|state>
+                = tr[M_(a|x) tensor M_(b|y)|state><state|]
+                = tr(sigma_(a|x)*M_(b|y)) #this is matrix multiplication not tensor product
+    Parameters
+    ----------
+    state : qutip.qobj.Qobj
+        state of the system (matrix).
+    Alice_measurement : qutip.qobj.Qobj
+        Alice's measurement vector (matrix).
+    Bob_measurement : qutip.qobj.Qobj
+        Bob's measurement vector (matrix).
+    Returns
+    -------
+    real float
+        probability of measuring a, b fiven x, y for measurements Axa & Byb.
+    """
+    # print(Alice_measurement, state)
+    sigma = sigma_ax(Alice_measurement, state)
+    sigma_times_M = sigma * Bob_proj
+    sigma_times_M = sigma_times_M.full()  # make it numpy rather than qutip
+
+    return np.real(np.trace(sigma_times_M))
+
+
+def get_all_diag_values():
+    """
+    Get number of permuatations of a0_b0, a1_b1, ..., an_bn
+    gives the number of deterministic strategies
+    """
+    arr = np.arange(0, d2, 1)
+    diagonal_values_list = [p for p in itertools.product(arr, repeat=no_measurements)]
+    return diagonal_values_list
+
+
+def get_off_diag_values(diagonal):
+    matrix = np.diag(diagonal)
+    for i in range(no_measurements):
+        bi_value = diagonal[i] % no_dimensions
+
+        for o in range(no_dimensions):
+            if diagonal[i] < (o + 1) * no_dimensions:
+                ai_value = o
+                break
+            # else:
+            #    a_value = no_dimensions - 1
+        # Have ai_value (subsection) & bj_value (pos. in subsec.)
+        for j in range(no_measurements):
+            if i == j:
+                break
+            else:
+                bj_value = diagonal[j] % no_dimensions
+                for o in range(no_dimensions):
+                    if diagonal[j] < (o + 1) * no_dimensions:
+                        aj_value = o
+                        break
+
+            matrix[i, j] = no_dimensions * ai_value + bj_value
+            matrix[j, i] = no_dimensions * aj_value + bi_value
+
+    return matrix
+
+
+def convert_mat_to_vec(mat):
+    vec = np.zeros(n2 * d2)
+    count = 0
+    for i in range(no_measurements):
+        for k in range(no_measurements):
+            vec[count * d2 + mat[i, k]] = 1
+            count += 1
+    return vec
+
+
+def matrix_of_det_strats():  # any dimension and number of measurements
+
+    no_rows = n2 * d2
+    no_cols = (no_dimensions ** no_measurements) ** 2
+    matrix = np.zeros((no_rows, no_cols))
+    diag_values = get_all_diag_values()
+    count = 0
+
+    for Tuple in diag_values:
+        strat_mat = get_off_diag_values(Tuple)
+        strat_vec = convert_mat_to_vec(strat_mat)
+        matrix[:, count] = strat_vec
+        count += 1
+
+    return matrix
+
+
+def test(mat):
+    """
+    1. Check if column elements sum to n2.
+    2. Check if each segment has 1 one.
+    """
+
+    for j in range((no_dimensions ** no_measurements) ** 2):
+        vec = mat[:, j]
+        if np.sum(vec) != n2:
+            print("Error 1")
+            return None
+
+        for k in range(n2):  # Loop over segments
+            temp = 0
+            for l in range(d2):  # Loop over elements in the segments
+                temp += vec[k * d2 + l]
+            if temp != 1:
+                print("Error 2")
+                return None
+
+    print("All good!")
+    return None
+
+
+def state_vector(state, Alice_measurements, Bob_measurements):
+    """ This is good for any dimension or number of measurements
+    For two measurements per party only
+    Parameters
+    ----------
+    state : qutip Qobj -> qp.qobj.Qobj
+        Chosen state as a vector.
+    Alice_measurements : qutip Qobj
+        Array of measurement projectors for Alice.
+        Alice_measurements = [A00, A01, A02, A10, A11, A12]
+    Bob_measurements : qutip Qobj
+        Array of measurement projectors for Bob.
+        Bob_measurements = [B00, B01, B02, B10, B11, B12]
+    Returns
+    -------
+    vector : numpy array
+        The 36 dimensional probability vector with the same structure as in
+        the columns of matrix_of_det_strats().
+    """
+    vector = np.zeros(n2 * d2)
+    count = 0
+    vec_count = 0
+
+    for a in range(no_measurements):
+        for b in range(no_measurements):
+            for i in range(a * no_dimensions, (a + 1) * no_dimensions):
+                for j in range(b * no_dimensions, (b + 1) * no_dimensions):
+                    vector[count] = probability(state, Alice_measurements[i], Bob_measurements[j])
+                    count += 1
+            vector[(vec_count + 1) * d2 - 1] = 1 - np.sum(vector[(vec_count) * d2:(vec_count + 1) * d2 - 1])
+            vec_count += 1
+
+    return vector
+
+
+def SDP_opt(state, Alice_measurements, Bob_measurements):
+    """
+    Find the random robustness for the given state and measurements. Minimise
+    epsilon such that (1-epsilon)*state36 + epsilon*max_mixed_state can be
+    expressed as a convex combination of deterministic local strategies.
+    Parameters
+    ----------
+    state : qutip.qobj.Qobj
+        state of the system (matrix).
+    Alice_measurement : qutip.qobj.Qobj
+        Alice's measurement vector (matrix).
+    Bob_measurement : qutip.qobj.Qobj
+        Bob's measurement vector (matrix).
+    Returns
+    -------
+    numpy float
+        Epsilon, random robustness. Epsilon values 0<=epsilon<=1
+    """
+    # Problem data.
+    # Make random measurement projectors that we will optimise
+    # Use nonneg=True when initialising variable rather then in constraints
+    # of SDP.
+    # M = Model()
+
+    I = cp.Variable(d2 * n2)  # q_vec[i] >= 0, sum(q_vec[i]) = 1
+
+    # Convert state from computational basis to 36 probability vector
+    state_vec = state_vector(state, Alice_measurements, Bob_measurements)
+
+    # Construct the problem.
+    objective = cp.Maximize((I @ state_vec - 1) / 2)
+
+    # Set the remaining constraints
+    constraints = [np.transpose(D) @ I >= -1, np.transpose(D) @ I <= 1]
+
+    prob = cp.Problem(objective, constraints)
+
+    result = prob.solve(solver=cp.MOSEK)
+
+    if result < 10 ** (-8):
+        return 0
+
+    return result
+
+
+def write_stats(filename, robustness_ME):
+    """
+    Parameters
+    ----------
+    filename : string
+        file name to save the statistics of the datasets.
+    Returns
+    -------
+    None.
+    """
+    nonzero_robustness_ME = np.delete(robustness_ME, np.where(robustness_ME < 1e-8))
+    volume_ME = len(nonzero_robustness_ME) / len(robustness_ME)
+
+    with open(filename, "w") as f:
+        f.write(
+            "Number of dimensions = {}, number of measurements per party = {}\n".format(no_dimensions, no_measurements))
+        f.write("Number of games = {}\n\n".format(no_games))
+        f.write("Max entangled state:\n\n")
+        f.write("Volume of nonlocality = {}\n\n".format(volume_ME))
+        f.write("Total dataset:\n")
+        f.write("Lowest score = {}\n".format(min(robustness_ME)))
+        f.write("Highest score = {}\n".format(max(robustness_ME)))
+        f.write("Mean score = {} ± {}\n".format(np.mean(robustness_ME),
+                                                3 * np.mean(robustness_ME) / np.sqrt(len(robustness_ME) - 1)))
+        f.write("Median score = {}\n".format(np.median(robustness_ME)))
+        f.write("STD of scores = {}\n".format(np.std(robustness_ME)))
+        # f.write("Variance of scores = {}\n\n".format(np.var(robustness_ME)))
+
+        f.write("Conditional dataset (remove zero r (epsilons)):\n")
+        f.write("Lowest score = {}\n".format(min(nonzero_robustness_ME)))
+        f.write("Mean score = {} ± {}\n".format(np.mean(nonzero_robustness_ME),
+                                                3 * np.mean(nonzero_robustness_ME) / np.sqrt(
+                                                    len(nonzero_robustness_ME) - 1)))
+        f.write("Median score = {}\n".format(np.median(nonzero_robustness_ME)))
+        f.write("STD of scores = {}\n".format(np.std(nonzero_robustness_ME)))
+        # f.write("Variance of scores = {}\n\n".format(np.var(nonzero_robustness_ME)))
+
+        f.write("\n\nfile created at {}".format(datetime.datetime.now()))
+        f.write("Showing three standard deviations for the uncertainty")
+        f.close()
+
+
+def plot(entanglement, y, y_err, ylabel, title):
+    fig, ax = plt.subplots(1, 1, figsize=(8, 7))
+
+    # Remove the if-statement for new data
+    # if ylabel == "NLV":
+    #    y_err = 3* y_err * np.sqrt((state_samples-1)/(no_games-1))
+
+    ax.plot(entanglement, y, 'o', color='tab:purple')
+    ax.errorbar(entanglement, y, yerr=y_err, fmt='o')
+    ax.set_xlabel("Entanglement", size=16)
+    ax.set_ylabel(ylabel, size=16)
+
+    plt.savefig(title + ".pdf")
+    plt.show()
+
+
+def plot_two_axis(xdata, y1, y2, y1_err, y2_err,
+                  y_label, y2_label, title=None, savename=None, log=False):
+    # Remove the if-statement for new data
+    # if ylabel == "NLV":
+    #     y_err = 3* y_err * np.sqrt((state_samples-1)/(no_games-1))
+
+    # Order
+    entanglement_index = np.argsort(entanglement)
+    xdata = [xdata[i] for i in entanglement_index]
+    y1 = [y1[i] for i in entanglement_index]
+    y2 = [y2[i] for i in entanglement_index]
+    y1_err = [y1_err[i] for i in entanglement_index]
+    y2_err = [y2_err[i] for i in entanglement_index]
+
+    # Get rid of zero elements to avoid taking the log of 0
+    y1 = np.delete(y1, np.where(y1 == 0))
+    y2 = np.delete(y2, np.where(y2 == 0))
+    length = min(len(y1), len(y2))
+
+    y1 = y1[-length::]
+    y2 = y2[-length::]
+
+    xdata = xdata[-length::]
+    y1_err = y1_err[-length::]
+    y2_err = y2_err[-length::]
+
+    fig, ax1 = plt.subplots()
+    ax1.set_xlabel('Entanglement')
+    ax1.set_ylabel(y_label)
+    if log == True:
+        ax1.semilogy(xdata, y1, 'o', color='tab:red', label="Mean", linestyle="None")
+    else:
+        ax1.plot(xdata, y1, 'o', color='tab:red', label="Mean", linestyle="None")
+
+    ax1.errorbar(xdata, y1, y1_err, color='tab:red', linestyle="None")
+
+    # Do second y axis
+    ax2 = ax1.twinx()
+    ax2.set_ylabel(y2_label)
+    if log == True:
+        ax2.semilogy(xdata, y2, 'o', color='tab:blue', label="Cond mean", linestyle="None")
+    else:
+        ax2.plot(xdata, y2, 'o', color='tab:blue', label="Cond mean", linestyle="None")
+
+    ax2.errorbar(xdata, y2, y2_err, color='tab:blue', linestyle="None")
+
+    # Combine legend data
+    h1, l1 = ax1.get_legend_handles_labels()
+    h2, l2 = ax2.get_legend_handles_labels()
+    ax1.legend(h1 + h2, l1 + l2, loc=2)
+
+    if title != None:
+        plt.title(title)
+
+    if savename != None:
+        plt.savefig(savename + '.pdf')
+
+    plt.show()
+
+
+def Von_Neumann_Entanglement(theta):
+    lambda_0 = np.cos(theta)
+    lambda_1 = np.sin(theta)
+
+    if lambda_0 == 0 or lambda_1 == 0:
+        return 0
+
+    else:
+        return -(lambda_0) * np.log(lambda_0) - (lambda_1) * np.log(lambda_1)
+
+
+def Robustness_Entanglement(theta):
+    return 2*np.sin(theta)*np.cos(theta)
+
+
+def calculate(no_games, seed):
+    """
+    Calculate random robustness for no_games.
+    Parameters
+    ----------
+    no_games : int
+        number of random games to run.
+    Returns
+    -------
+    max_entangled_epsilons : numpy array (floats)
+        Random robustness epsilons for no_games and max entangled state.
+    """
+
+    # mean_robustness = np.zeros(state_samples)
+    # cond_mean_robustness = np.zeros(state_samples)
+    # NLV = np.zeros(state_samples)
+
+    # mean_robustness_err = np.zeros(state_samples)
+    # cond_mean_robustness_err = np.zeros(state_samples)
+    # NLV_err = np.zeros(state_samples)
+
+    thetas = loadThetas() 
+    robustness = np.zeros((no_games, state_samples))  
+    for i in tqdm(range(no_games), desc="Generating robustness..."):
+        
+        # Get random projective measurements
+        A_measurements = get_random_measurements()
+        B_measurements = get_random_measurements()
+        
+        for k in range(state_samples):
+            state = np.cos(thetas[k]) * zero_zero + np.sin(thetas[k]) * one_one
+            # Get max entangled robustness
+            robustness[i,k] = SDP_opt(state, A_measurements, B_measurements)
+
+    return robustness
+
+
+def analyse(robustness):
+
+    mean_robustness = np.zeros(state_samples)    
+    cond_mean_robustness = np.zeros(state_samples)    
+    NLV = np.zeros(state_samples)    
+    mean_robustness_err = np.zeros(state_samples)    
+    cond_mean_robustness_err = np.zeros(state_samples)    
+    NLV_err = np.zeros(state_samples)    
+
+    for k in range(state_samples):
+        nonzero_robustness = np.delete(robustness[:,k], np.where(robustness[:,k] < 1e-8))
+
+        mean_robustness[k] = np.mean(robustness[:,k])
+        NLV[k] = len(nonzero_robustness) / no_games
+
+        mean_robustness_err[k] = 3*np.std(robustness[:,k]) / np.sqrt(no_games - 1)
+
+        if len(nonzero_robustness) == 0 or len(nonzero_robustness) == 1:
+            cond_mean_robustness[k] = 0
+            cond_mean_robustness_err[k] = 0
+            NLV_err[k] = 0
+
+        else:
+            cond_mean_robustness[k] = np.mean(nonzero_robustness)
+            cond_mean_robustness_err[k] = 3*np.std(nonzero_robustness) / np.sqrt(len(nonzero_robustness) - 1)
+            NLV_err[k] = 3*np.sqrt((NLV[k] - NLV[k] ** 2) / (len(nonzero_robustness) - 1))
+
+    return mean_robustness, cond_mean_robustness, NLV, mean_robustness_err, cond_mean_robustness_err, NLV_err
+
+
+def random_numbers(no):
+    rand_nos = np.random.randint(0, int(2 ** 32 - 1), dtype=np.int64, size=no)
+    if len(np.unique(rand_nos)) != no:
+        random_numbers(no)
+
+    return rand_nos
+
+
+def save(entanglement, mean_robustness, cond_mean_robustness, NLV, mean_robustness_err, cond_mean_robustness_err,
+         NLV_err, batch_no):
+    with open("Data/Entanglement, no_games {}, state samples {}, d{}, m{} batch {}.npy"
+                      .format(no_games, state_samples, no_dimensions, no_measurements, batch_no), "wb") as f:
+        np.save(f, entanglement)
+        f.close()
+
+    with open("Data/Mean robustness, no_games {}, state samples {}, d{}, m{} batch {}.npy"
+                      .format(no_games, state_samples, no_dimensions, no_measurements, batch_no), "wb") as f:
+        np.save(f, mean_robustness)
+        f.close()
+
+    with open("Data/Conditional mean robustness, no_games {}, state samples {}, d{}, m{} batch {}.npy"
+                      .format(no_games, state_samples, no_dimensions, no_measurements, batch_no), "wb") as f:
+        np.save(f, cond_mean_robustness)
+        f.close()
+
+    with open("Data/NLV, no_games {}, state samples {}, d{}, m{} batch {}.npy"
+                      .format(no_games, state_samples, no_dimensions, no_measurements, batch_no), "wb") as f:
+        np.save(f, NLV)
+        f.close()
+
+    with open("Data/Mean robustness error, no_games {}, state samples {}, d{}, m{} batch {}.npy"
+                      .format(no_games, state_samples, no_dimensions, no_measurements, batch_no), "wb") as f:
+        np.save(f, mean_robustness_err)
+        f.close()
+
+    with open("Data/Conditional mean robustness error, no_games {}, state samples {}, d{}, m{} batch {}.npy"
+                      .format(no_games, state_samples, no_dimensions, no_measurements, batch_no), "wb") as f:
+        np.save(f, cond_mean_robustness_err)
+        f.close()
+
+    with open("Data/NLV error, no_games {}, state samples {}, d{}, m{} batch {}.npy".format(no_games, state_samples, no_dimensions, no_measurements, batch_no),
+              "wb") as f:
+        np.save(f, NLV_err)
+        f.close()
+
+
+def save_all(entanglement, mean_robustness, cond_mean_robustness, NLV, mean_robustness_err, cond_mean_robustness_err,
+             NLV_err):
+    with open("Data/Entanglement, no_games {}, state samples {}, d{}, m{} all.npy".format(no_games, state_samples, no_dimensions, no_measurements), "wb") as f:
+        np.save(f, entanglement)
+        f.close()
+
+    with open("Data/Mean robustness, no_games {}, state samples {}, d{}, m{} all.npy".format(no_games, state_samples, no_dimensions, no_measurements), "wb") as f:
+        np.save(f, mean_robustness)
+        f.close()
+
+    with open("Data/Conditional mean robustness, no_games {}, state samples {}, d{}, m{} all.npy".format(no_games, state_samples, no_dimensions, no_measurements),
+              "wb") as f:
+        np.save(f, cond_mean_robustness)
+        f.close()
+
+    with open("Data/NLV, no_games {}, state samples {}, d{}, m{} all.npy".format(no_games, state_samples, no_dimensions, no_measurements), "wb") as f:
+        np.save(f, NLV)
+        f.close()
+
+    with open("Data/Mean robustness error, no_games {}, state samples {}, d{}, m{} all.npy".format(no_games, state_samples, no_dimensions, no_measurements),
+              "wb") as f:
+        np.save(f, mean_robustness_err)
+        f.close()
+
+    with open("Data//Conditional mean robustness error, no_games {}, state samples {}, d{}, m{} all.npy".format(no_games, state_samples, no_dimensions, no_measurements),
+            "wb") as f:
+        np.save(f, cond_mean_robustness_err)
+        f.close()
+
+    with open("Data/NLV error, no_games {}, state samples {}, d{}, m{} all.npy".format(no_games, state_samples, no_dimensions, no_measurements), "wb") as f:
+        np.save(f, NLV_err)
+        f.close()
+
+
+def load(batch_no):
+    with open("Data/Entanglement, no_games {}, state samples {}, d{}, m{} batch {}.npy".format(no_games, state_samples, no_dimensions, no_measurements, batch_no),
+              "rb") as f:
+        entanglement = np.load(f)
+        f.close()
+
+    with open("Data/Mean robustness, no_games {}, state samples {}, d{}, m{} batch {}.npy".format(no_games, state_samples, no_dimensions, no_measurements, batch_no),
+              "rb") as f:
+        mean_robustness = np.load(f)
+        f.close()
+
+    with open("Data/Conditional mean robustness, no_games {}, state samples {}, d{}, m{} batch {}.npy".format(no_games, state_samples, no_dimensions, no_measurements,
+                      batch_no), "rb") as f:
+        cond_mean_robustness = np.load(f)
+        f.close()
+
+    with open("Data/NLV, no_games {}, state samples {}, d{}, m{} batch {}.npy".format(no_games, state_samples, no_dimensions, no_measurements, batch_no), "rb") as f:
+        NLV = np.load(f)
+        f.close()
+
+    with open("Data/Mean robustness error, no_games {}, state samples {}, d{}, m{} batch {}.npy".format(no_games, state_samples, no_dimensions, no_measurements,
+                batch_no), "rb") as f:
+        mean_robustness_err = np.load(f)
+        f.close()
+
+    with open("Data/Conditional mean robustness error, no_games {}, state samples {}, d{}, m{} batch {}.npy".format(no_games, state_samples, no_dimensions, no_measurements, batch_no), "rb") as f:
+        cond_mean_robustness_err = np.load(f)
+        f.close()
+
+    with open("Data/NLV error, no_games {}, state samples {}, d{}, m{} batch {}.npy".format(no_games, state_samples, no_dimensions, no_measurements, batch_no),
+              "rb") as f:
+        NLV_err = np.load(f)
+        f.close()
+
+    return entanglement, mean_robustness, cond_mean_robustness, NLV, mean_robustness_err, cond_mean_robustness_err, NLV_err
+
+
+def load_all(no_measurements):
+    with open("Data/Entanglement, no_games {}, state samples {}, d{}, m{} all.npy".format(no_games, state_samples, no_dimensions, no_measurements), "rb") as f:
+        entanglement = np.load(f)
+        f.close()
+
+    with open("Data/Mean robustness, no_games {}, state samples {}, d{}, m{} all.npy".format(no_games, state_samples, no_dimensions, no_measurements), "rb") as f:
+        mean_robustness = np.load(f)
+        f.close()
+
+    with open("Data/Conditional mean robustness, no_games {}, state samples {}, d{}, m{} all.npy".format(no_games, state_samples, no_dimensions, no_measurements),
+              "rb") as f:
+        cond_mean_robustness = np.load(f)
+        f.close()
+
+    with open("Data/NLV, no_games {}, state samples {}, d{}, m{} all.npy".format(no_games, state_samples, no_dimensions, no_measurements), "rb") as f:
+        NLV = np.load(f)
+        f.close()
+
+    with open("Data/Mean robustness error, no_games {}, state samples {}, d{}, m{} all.npy".format(no_games, state_samples, no_dimensions, no_measurements),
+              "rb") as f:
+        mean_robustness_err = np.load(f)
+        f.close()
+
+    with open("Data/Conditional mean robustness error, no_games {}, state samples {}, d{}, m{} all.npy".format(no_games, state_samples, no_dimensions, no_measurements),
+            "rb") as f:
+        cond_mean_robustness_err = np.load(f)
+        f.close()
+
+    with open("Data/NLV error, no_games {}, state samples {}, d{}, m{} all.npy".format(no_games, state_samples, no_dimensions, no_measurements), "rb") as f:
+        NLV_err = np.load(f)
+        f.close()
+
+    return entanglement, mean_robustness, cond_mean_robustness, NLV, mean_robustness_err, cond_mean_robustness_err, NLV_err
+
+
+def parallel_data_production(batch_no=0):
+    with mp.Pool() as pool:
+        results = pool.starmap(calculate,
+                               inputs[no_cores * batch_no:no_cores * (batch_no + 1)])  # [no_games_per_core]*no_cores)
+
+    robustness = np.concatenate([results[n] for n in range(no_cores)])
+    
+    thetas = loadThetas()
+    entanglement = Robustness_Entanglement(thetas)
+
+    mean_robustness, cond_mean_robustness, NLV, mean_robustness_err, cond_mean_robustness_err, NLV_err = analyse(robustness)
+
+    save(entanglement, mean_robustness, cond_mean_robustness, NLV, mean_robustness_err, cond_mean_robustness_err,
+         NLV_err, batch_no)
+
+    # write_stats("Robustness, no games {}, batch number {}.txt".format(no_games, batch_no), batch_no)
+
+
+def order(entanglement, ydata):
+    entanglement_index = np.argsort(entanglement)
+    entanglement = [entanglement[i] for i in entanglement_index]
+    ydata = [ydata[i] for i in entanglement_index]
+
+    return entanglement, ydata
+
+
+def sort(xdata, y1, y2, y1_err, y2_err):
+
+    entanglement_index = np.argsort(xdata)
+    xdata = [xdata[i] for i in entanglement_index]
+    y1 = [y1[i] for i in entanglement_index]
+    y2 = [y2[i] for i in entanglement_index]
+    y1_err = [y1_err[i] for i in entanglement_index]
+    y2_err = [y2_err[i] for i in entanglement_index]
+    
+    # Get rid of zero elements to avoid taking the log of 0 and get rif of floating point errors
+    y1 = np.delete(y1, np.where(np.array(y1)< 1e-7))
+    y2 = np.delete(y2, np.where(np.array(y2)< 1e-7))
+    length = min(len(y1), len(y2))
+    
+    y1 = np.array(y1[-length::])
+    y2 = np.array(y2[-length::])
+    
+    xdata = np.array(xdata[-length::])
+    y1_err = np.array(y1_err[-length::])
+    y2_err = np.array(y2_err[-length::])
+    
+    return xdata, y1, y2, y1_err, y2_err
+
+
+def plotRvsE(ent_m2, ent_m3, ent_m4, ent_m5,
+             rob_m2, rob_m3, rob_m4, rob_m5,
+             rob_m2_err, rob_m3_err, rob_m4_err, rob_m5_err,
+             y_label, name):
+
+    fig, ax = plt.subplots()
+    ax.set_xlabel('Robustness')
+    ax.set_ylabel(y_label)
+    
+    ax.plot(ent_m2, rob_m2, 'o', color='tab:red', label = "$m=2$")#, linestyle = "None")
+    ax.errorbar(ent_m2, rob_m2, rob_m2_err, color =  'tab:red')#, linestyle = "None")
+    
+    ax.plot(ent_m3, rob_m3, 'o', color='tab:red', label = "$m=3$")#, linestyle = "None")
+    ax.errorbar(ent_m3, rob_m3, rob_m3_err, color =  'tab:purple')#, linestyle = "None")
+    
+    ax.plot(ent_m4, rob_m4, 'o', color='tab:red', label = "$m=4$")#, linestyle = "None")
+    ax.errorbar(ent_m4, rob_m4, rob_m4_err, color =  'tab:blue')#, linestyle = "None")
+    
+    ax.plot(ent_m5, rob_m5, 'o', color='tab:red', label = "$m=5$")#, linestyle = "None")
+    ax.errorbar(ent_m5, rob_m5, rob_m5_err, color =  'tab:cyan')#, linestyle = "None")
+
+    handles, labels = ax.get_legend_handles_labels()
+    ax.legend(handles[::-1], labels[::-1], loc='upper left')
+    plt.savefig(name + ".pdf")
+    plt.show()
+
+
+# def correctError():
+#     entanglement, mean_robustness, cond_mean_robustness, NLV, mean_robustness_err, cond_mean_robustness_err, NLV_err = load_all(no_measurements)
+#     mean_robustness_err *= 3
+#     cond_mean_robustness_err *= 3
+#     NLV_err *= 3
+#     save_all(entanglement, mean_robustness, cond_mean_robustness, NLV, mean_robustness_err, cond_mean_robustness_err,NLV_err)
+
+
+def generateThetas():
+    
+    """Generate thetas in advance so that each round for m would
+    run over the same entanglements. """
+    
+    thetas = (np.pi / 4) *  np.random.random(state_samples)
+    
+    with open("Data/Thetas, state_samples = {}.npy".format(state_samples), "wb") as f:
+        np.save(f, thetas)
+        f.close()
+
+
+def generateEntanglement():
+    
+    thetas = loadThetas()
+    entanglement = Robustness_Entanglement(thetas)
+
+    with open("Data/Entanglement, state_samples = {}.npy".format(state_samples), "wb") as f:
+        np.save(f, entanglement)
+        f.close()
+
+
+def loadEntanglement():
+    
+    with open("Data/Entanglement, state_samples = {}.npy".format(state_samples), "rb") as f:
+        entanglement = np.load(f)
+        f.close()
+
+    return entanglement
+
+
+def loadThetas():
+    
+    with open("Data/Thetas, state_samples = {}.npy".format(state_samples), "rb") as f:
+        thetas = np.load(f)
+        f.close()
+
+    return thetas
+
+
+def func(x, a, b):
+    return a * x + b
+
+
+def fit(x, y):
+    
+    popt, pcov = curve_fit(func, np.log2(x), np.log2(y))    
+    y_fit = 2**(popt[0]*np.log2(x)+popt[1])
+        
+    #print(np.sqrt(pcov[0][0]), np.sqrt(pcov[1][1]))
+    
+    a = np.round(popt[0], 2)
+    b = np.round(popt[1], 2)
+    a_err = np.round(np.sqrt(pcov[0][0]), 2)
+    b_err = np.round(np.sqrt(pcov[1][1]), 2)
+    
+    print("a = {}±{} and b = {}±{}".format(a, a_err, b, b_err))
+    
+    return x, y_fit
+
+
+no_dimensions = 2
+no_measurements = 5
+no_games = 10**4
+state_samples = 20
+
+zero = qp.basis(2, 0)
+one = qp.basis(2, 1)
+zero_zero = qp.tensor(zero, zero)
+one_one = qp.tensor(one, one)
+
+no_batches = 1
+no_games_per_batch = int(no_games / no_batches)
+
+# Conversions
+d2 = no_dimensions ** 2
+n2 = no_measurements ** 2
+
+entanglement_all = np.array([])
+mean_robustness_all = np.array([])
+cond_mean_robustness_all = np.array([])
+NLV_all = np.array([])
+mean_robustness_err_all = np.array([])
+cond_mean_robustness_err_all = np.array([])
+NLV_err_all = np.array([])
+
+mode = 'plot'
+
+if mode == 'calculate':
+    D = matrix_of_det_strats()
+    #thetas = generateThetas()
+    if __name__ == '__main__':
+        no_cores = mp.cpu_count() - 1
+        no_games_per_core = int(no_games_per_batch / no_cores)
+
+        random_seeds = random_numbers(no_cores * no_batches)
+        inputs = [(no_games_per_core, seed) for seed in random_seeds]
+        print("Number of unique random seeds = " + str(len(list(zip(*inputs))[1])))
+        print("Number of cores = " + str(no_cores))
+        print("Number of batches = " + str(no_batches))
+        print("d={}, m={}, no games={}, no state samples={}\n".format(
+            no_dimensions, no_measurements, no_games, state_samples))
+
+        for i in range(no_batches):
+            parallel_data_production(i)
+
+        for batch_no in range(no_batches):
+            entanglement, mean_robustness, cond_mean_robustness, NLV, mean_robustness_err, cond_mean_robustness_err, NLV_err = load(
+                batch_no)
+
+            entanglement_all = np.append(entanglement_all, entanglement)
+            mean_robustness_all = np.append(mean_robustness_all, mean_robustness)
+            cond_mean_robustness_all = np.append(cond_mean_robustness_all, cond_mean_robustness)
+            NLV_all = np.append(NLV_all, NLV)
+            mean_robustness_err_all = np.append(mean_robustness_err_all, mean_robustness_err)
+            cond_mean_robustness_err_all = np.append(cond_mean_robustness_err_all, cond_mean_robustness_err)
+            NLV_err_all = np.append(NLV_err_all, NLV_err)
+
+        save_all(entanglement_all, mean_robustness_all, cond_mean_robustness_all, NLV_all, mean_robustness_err_all,
+                 cond_mean_robustness_err_all, NLV_err_all)
+        
+
+if mode == 'plot':
+
+    N = [2,3,4,5]
+
+    fig1, ax1 = plt.subplots()
+    ax1.set_xlabel('Entanglement')
+    ax1.set_ylabel('Mean Robustness')
+
+    fig2, ax2 = plt.subplots()
+    ax2.set_xlabel('Entanglement')
+    ax2.set_ylabel('Cond Mean Robustness')
+
+    for n in N:        
+        entanglement, mean_robustness, cond_mean_robustness, NLV, mean_robustness_err, cond_mean_robustness_err, NLV_err = load_all(n)
+        entanglement, mean_robustness, cond_mean_robustness, mean_robustness_err, cond_mean_robustness_err = sort(entanglement, mean_robustness, cond_mean_robustness, mean_robustness_err, cond_mean_robustness_err)
+
+        #entanglement = np.log2(entanglement+1)
+        #mean_robustness = np.log2(mean_robustness+1)
+        #cond_mean_robustness = np.log2(cond_mean_robustness+1)
+
+        # entanglement += 1
+        # mean_robustness += 1
+        # cond_mean_robustness += 1
+
+        # entanglement = np.log2(entanglement)
+        # mean_robustness = np.log2(mean_robustness)
+        # cond_mean_robustness = np.log2(cond_mean_robustness)
+
+
+        if n == 2:
+            ax1.plot(entanglement, mean_robustness, 'o', color='tab:red', label = "$m=2$", linestyle = "None")
+            ax1.errorbar(entanglement, mean_robustness, mean_robustness_err, color =  'tab:red', linestyle = "None")
+            #x_fit, y_fit = fit(entanglement, mean_robustness)
+            #ax1.plot(x_fit, y_fit, '-', color='tab:red')
+
+            ax2.plot(entanglement, cond_mean_robustness, 'o', color='tab:red', label = "$m=2$", linestyle = "None")
+            ax2.errorbar(entanglement, cond_mean_robustness, cond_mean_robustness_err, color =  'tab:red', linestyle = "None")
+            #x_fit, y_fit = fit(entanglement, cond_mean_robustness)
+            #ax2.plot(x_fit, y_fit, '-', color='tab:red')
+
+        elif n == 3:
+            ax1.plot(entanglement, mean_robustness, 'o', color='tab:purple', label = "$m=3$", linestyle = "None")
+            ax1.errorbar(entanglement, mean_robustness, mean_robustness_err, color = 'tab:purple', linestyle = "None")
+            #x_fit, y_fit = fit(entanglement, mean_robustness)
+            #ax1.plot(x_fit, y_fit, '-', color='tab:purple')
+            
+            ax2.plot(entanglement, cond_mean_robustness, 'o', color='tab:purple', label = "$m=3$", linestyle = "None")
+            ax2.errorbar(entanglement, cond_mean_robustness, cond_mean_robustness_err, color =  'tab:purple', linestyle = "None")
+            #x_fit, y_fit = fit(entanglement, cond_mean_robustness)
+            #ax2.plot(x_fit, y_fit, '-', color='tab:purple')
+
+        elif n == 4:
+            ax1.plot(entanglement, mean_robustness, 'o', color='tab:blue', label = "$m=4$", linestyle = "None")
+            ax1.errorbar(entanglement, mean_robustness, mean_robustness_err, color = 'tab:blue', linestyle = "None")
+            #x_fit, y_fit = fit(entanglement, mean_robustness)
+            #ax1.plot(x_fit, y_fit, '-', color='tab:blue')
+
+            ax2.plot(entanglement, cond_mean_robustness, 'o', color='tab:blue', label = "$m=4$", linestyle = "None")
+            ax2.errorbar(entanglement, cond_mean_robustness, cond_mean_robustness_err, color =  'tab:blue', linestyle = "None")
+            #x_fit, y_fit = fit(entanglement, cond_mean_robustness)
+            #ax2.plot(x_fit, y_fit, '-', color='tab:blue')
+
+        elif n == 5:
+            ax1.plot(entanglement, mean_robustness, 'o', color='tab:cyan', label = "$m=5$", linestyle = "None")
+            ax1.errorbar(entanglement, mean_robustness, mean_robustness_err, color = 'tab:cyan', linestyle = "None")
+            #x_fit, y_fit = fit(entanglement, mean_robustness)
+            #ax1.plot(x_fit, y_fit, '-', color='tab:cyan')
+
+            ax2.plot(entanglement, cond_mean_robustness, 'o', color='tab:cyan', label = "$m=5$", linestyle = "None")
+            ax2.errorbar(entanglement, cond_mean_robustness, cond_mean_robustness_err, color =  'tab:cyan', linestyle = "None")
+            #x_fit, y_fit = fit(entanglement, cond_mean_robustness)
+            #ax2.plot(x_fit, y_fit, '-', color='tab:cyan')
+
+    ax1.loglog(base = 2)
+    ax2.loglog(base = 2)
+
+    handles, labels = ax1.get_legend_handles_labels()
+    ax1.legend(handles[::-1], labels[::-1], loc='upper left')    
+    
+    handles, labels = ax2.get_legend_handles_labels()
+    ax2.legend(handles[::-1], labels[::-1], loc='upper left')
+    
+    ax1.grid()
+    ax1.xaxis.grid(which='minor')
+    ax2.grid()
+    ax2.xaxis.grid(which='minor')
+    
+    
+    fig1.savefig("Mean Robustness vs Entanglement.pdf")
+    fig2.savefig("Cond Mean Robustness vs Entanglement.pdf")
+
+    plt.show()
+
+
+    # def new_plot(xdata, y1, y2, y1_err, y2_err,
+    #                    y_label, x_label='Robustness Entanglement', title=None, savename=None, log=False):
+
+    #     entanglement_index = np.argsort(xdata)
+    #     xdata = [xdata[i] for i in entanglement_index]
+    #     y1 = [y1[i] for i in entanglement_index]
+    #     y2 = [y2[i] for i in entanglement_index]
+    #     y1_err = [y1_err[i] for i in entanglement_index]
+    #     y2_err = [y2_err[i] for i in entanglement_index]
+
+    #     # Get rid of zero elements to avoid taking the log of 0 and get rif of floating point errors
+    #     y1 = np.delete(y1, np.where(np.array(y1)< 1e-7))
+    #     y2 = np.delete(y2, np.where(np.array(y2)< 1e-7))
+    #     length = min(len(y1), len(y2))
+
+    #     y1 = np.array(y1[-length::])
+    #     y2 = np.array(y2[-length::])
+
+    #     xdata = np.array(xdata[-length::])
+    #     y1_err = np.array(y1_err[-length::])
+    #     y2_err = np.array(y2_err[-length::])
+
+    #     fig, ax = plt.subplots()
+    #     ax.set_xlabel(x_label, size = 12)
+    #     ax.set_ylabel(y_label, size = 12)
+    #     ax.plot(xdata, y1, 'o', color='tab:red', label="Mean")  # , linestyle = "None")
+
+    #     ax.errorbar(xdata, y1, y1_err, color='tab:red')  # , linestyle = "None")
+
+    #     # Second dataset
+    #     ax.plot(xdata, y2, 'o', color='tab:blue', label="Cond mean")  # , linestyle = "None")
+    #     ax.errorbar(xdata, y2, y2_err, color='tab:blue')  # , linestyle = "None")
+
+    #     if log==True:
+    #         #ax.set_yscale('log')
+    #         #ax.set_xscale('log')
+    #         a=2
+    #         ax.set_xlim(0.21, 0.72)
+    #         ax.legend(loc=4)
+    #         ax.grid(which = "minor", axis = "x")
+            
+    #         slope1, intercept1 = np.polyfit(xdata, y1, 1)
+    #         slope2, intercept2 = np.polyfit(xdata, y2, 1)
+    #         slope1_err = np.sqrt(np.polyfit(xdata, y1, 1, cov = True)[1][0, 0])
+    #         intercept1_err = np.sqrt(np.polyfit(xdata, y1, 1, cov = True)[1][1, 1])
+    #         slope2_err = np.sqrt(np.polyfit(xdata, y2, 1, cov = True)[1][0, 0])
+    #         intercept2_err = np.sqrt(np.polyfit(xdata, y2, 1, cov = True)[1][1, 1])
+            
+    #         y1_fit = slope1*xdata
+    #         y2_fit = slope2*xdata 
+            
+    #         slope1 = np.round(slope1, 5)
+    #         slope2 = np.round(slope2, 5)
+    #         intercept1 = np.round(intercept1, 5)
+    #         intercept2 = np.round(intercept2, 5)
+    #         slope1_err = np.round(slope1_err, 5)
+    #         slope2_err = np.round(slope2_err, 5)
+    #         intercept1_err = np.round(intercept1_err, 5)
+    #         intercept2_err = np.round(intercept2_err, 5)
+            
+    #         print("Mean slope is {}±{} and intercept is {}±{}".format(slope1, slope1_err, intercept1, intercept1_err))
+    #         print("Cond mean slope is {}±{} and intercept is {}±{}".format(slope2, slope2_err, intercept2, intercept2_err))
+
+    #         #ax.plot(xdata, y1_fit, '-', color='tab:red')  # , linestyle = "None")
+
+    #         # Second dataset
+    #         #ax.plot(xdata, y2_fit, '-', color='tab:blue')  # , linestyle = "None")
+
+    #         ax.loglog()
+
+
+    #     # Legend, title, and saving
+    #     ax.legend(loc=2)
+    #     ax.grid()
+    #     #if title != None:
+    #     #    plt.title(title)
+        
+    #     if savename != None:
+    #         plt.savefig("Plots/"+savename + '.pdf')
+
+    #     plt.show()
+
+
+    # new_plot(entanglement, mean_robustness, cond_mean_robustness, mean_robustness_err, cond_mean_robustness_err,
+    #          "$R_N$", "$R_E$","Normal Plot", savename=f"RvsE, d={no_dimensions}, m={no_measurements}")  # "Robustness vs number of measurements, d={}".format(no_dimensions))
+
+    # log_entanglement = np.log(entanglement+1)
+    # log_mean_robustness = np.log(mean_robustness+1)
+    # log_cond_mean_robustness = np.log(cond_mean_robustness+1)
+    # new_plot(log_entanglement, log_mean_robustness, log_cond_mean_robustness, mean_robustness_err, cond_mean_robustness_err,
+    #                "log(1+$R_N$)", r"log(1+$R_E$)", "Log Plot", savename=f"RvsE, d={no_dimensions}, m={no_measurements}, log plot", log=True)#"Robustness vs number of measurements, d={}".format(no_dimensions))# Imports and required parameters
