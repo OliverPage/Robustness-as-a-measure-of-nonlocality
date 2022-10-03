@@ -582,8 +582,8 @@ def ME_state():
 
 
 # Parameters
-no_dimensions = 4
-no_measurements = 4
+no_dimensions = 3
+no_measurements = 5
 
 no_games = 10**3
 no_batches = 1
@@ -604,7 +604,7 @@ NLV_err_all = np.array([])
 
 #save_all([],[],[],[],[],[])
 
-mode = 'calculate'
+mode = 'plot'
 
 if mode == 'calculate':
     
@@ -689,11 +689,8 @@ elif mode == 'plot':
         NLVs_err = []
         
         for d in D:
-            
-            if (n == 5 and d == 3) or (n == 3 and d == 6):
-                no_games = 10**2
-            
-            elif (n == 4 and d == 4) or (n == 3 and d == 5) or (n == 2 and d == 7) or (n == 5 and d == 2):
+
+            if (n == 3 and d == 5) or (n == 4 and d == 4) or (n == 5 and d == 2) or (n == 5 and d == 3):
                 no_games = 10**3
             
             else:
