@@ -533,7 +533,7 @@ def save_all(entanglement, mean_robustness, cond_mean_robustness, NLV, mean_robu
         np.save(f, mean_robustness_err)
         f.close()
 
-    with open("Data//Conditional mean robustness error, no_games {}, state samples {}, d{}, m{} all.npy".format(no_games, state_samples, no_dimensions, no_measurements),
+    with open("Data/Conditional mean robustness error, no_games {}, state samples {}, d{}, m{} all.npy".format(no_games, state_samples, no_dimensions, no_measurements),
             "wb") as f:
         np.save(f, cond_mean_robustness_err)
         f.close()
